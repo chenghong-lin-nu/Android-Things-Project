@@ -53,6 +53,8 @@ import com.google.android.things.pio.PeripheralManager;
 
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
 import org.eclipse.paho.client.mqttv3.MqttCallbackExtended;
+import org.eclipse.paho.client.mqttv3.MqttClient;
+import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 
@@ -105,8 +107,8 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
     public static String img_url = null;
 
     // Mqtt部分
-    //MqttHelper mqttHelper;
-    //final String publishMessage = "Hello World!";
+    MqttHelper mqttHelper;
+    final String publishMessage = "Hello World!";
 
     @Override
     protected void onCreate(final Bundle savedInstanceState) {
@@ -127,12 +129,15 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
         init();
 
     }
-    
+
     private void init() {
         mBackgroundThread = new HandlerThread("BackgroundThread");
         mBackgroundThread.start();
         mBackgroundHandler = new Handler(mBackgroundThread.getLooper());
         mBackgroundHandler.post(mInitializeOnBackground);
+
+        startMqtt();
+        //mqttHelper = new MqttHelper();
     }
 
     private Runnable mInitializeOnBackground = new Runnable() {
@@ -156,6 +161,34 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
             setReady(true);
         }
     };
+
+    // Mqtt部分
+    private void startMqtt(){
+        mqttHelper = new MqttHelper(getApplicationContext());
+        mqttHelper.setCallback(new MqttCallbackExtended() {
+            @Override
+            public void connectComplete(boolean b, String s) {
+
+            }
+
+            @Override
+            public void connectionLost(Throwable throwable) {
+
+            }
+
+            @Override
+            public void messageArrived(String topic, MqttMessage mqttMessage) throws Exception {
+                Log.w("Debug",mqttMessage.toString());
+                //dataReceived.setText(mqttMessage.toString());
+                System.out.println("嗨，我倒要看看你收到了什么信息"+mqttMessage.toString());
+            }
+
+            @Override
+            public void deliveryComplete(IMqttDeliveryToken iMqttDeliveryToken) {
+
+            }
+        });
+    }
 
     private Runnable mBackgroundClickHandler = new Runnable() {
         @Override
@@ -239,13 +272,16 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
             // 把bitmap转化为byte数组
             ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
             bitmap.compress(Bitmap.CompressFormat.PNG, 100, byteArrayOutputStream);
-            byte[] byteArray = byteArrayOutputStream .toByteArray();
+            byte[] byteArray = byteArrayOutputStream.toByteArray();
             // 构造上传请求
             // 这里的objectKey其实就是服务器上的路径，即目录+文件名(相当于是自己定义)
-            String object_key = FOLDER + "camera_img.jpg";
-            PutObjectRequest put = new PutObjectRequest(BUCKET_NAME, object_key, byteArray);
-            System.out.println("PutObjectRequest这里出现了问题????");
+            // 上传的操作都要写在try-catch里面
+            int flag = -1;
             try {
+                String object_key = FOLDER + "camera_img.jpg";
+                PutObjectRequest put = new PutObjectRequest(BUCKET_NAME, object_key, byteArray);
+                System.out.println("PutObjectRequest这里出现了问题????");
+
                 PutObjectResult putResult = client.putObject(put);
                 Log.d("PutObject", "UploadSuccess");
                 Log.d("ETag", putResult.getETag());
@@ -255,6 +291,8 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
                 // 保存上传图片的文件路径
                 img_url = "https://tf-img-classifier.oss-cn-shanghai.aliyuncs.com/camera_img.jpg";
                 System.out.println("---------------->成功!");
+
+                flag = 1;
             } catch (ClientException e) {
                 // 本地异常如网络异常等
                 e.printStackTrace();
@@ -267,7 +305,50 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
                 Log.e("RawMessage", e.getRawMessage());
                 System.out.println("---------------->异常!");
             }
+            if(flag == 1){
+                // ##################################################
+                // 4.1号添加
+                // Mqtt发布到broker中去
+                //mqttHelper.publishMessage(img_url);
+                try {
+                    MqttClient sampleClient = new MqttClient(mqttHelper.serverUri, mqttHelper.clientId, null);
+                    //sampleClient.setCallback(new MyMqttCallback());
 
+                    // 创建连接选择
+                    MqttConnectOptions connOpts = getMqttConnectOptions(mqttHelper.username,mqttHelper.password);
+                    System.out.println("Connecting to broker: "+mqttHelper.serverUri);
+
+                    sampleClient.connect(connOpts);
+                    System.out.println("Connected");
+
+                    //sampleClient.subscribe(mqttHelper.publishTopic);
+
+                    //在另一个线程中发送消息
+                    Thread thread = new Thread(() -> {
+                        try {
+                            publishMsg(mqttHelper.publishTopic, img_url, sampleClient);
+                        } catch (MqttException e) {
+                            e.printStackTrace();
+                        }
+                    });
+                    thread.start();
+
+                    thread.join();
+                    //断开服务连接
+                    sampleClient.disconnect();
+                    System.out.println("Disconnected");
+                } catch (MqttException me) {
+                    System.out.println("reason "+me.getReasonCode());
+                    System.out.println("msg "+me.getMessage());
+                    System.out.println("loc "+me.getLocalizedMessage());
+                    System.out.println("cause "+me.getCause());
+                    System.out.println("excep "+me);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+
+                // 还差接受另一个频道的消息
+            }
         }
 
         runOnUiThread(new Runnable() {
@@ -309,6 +390,33 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
         // to ready right away.
         setReady(true);
     }
+
+    //////////////////////
+    private static void publishMsg(String topic, String content, MqttClient sampleClient) throws MqttException {
+        System.out.println("消息的内容是什么呢?"+content);
+
+        //创建消息内容
+        MqttMessage message = new MqttMessage(content.getBytes());
+        //发送消息
+        sampleClient.publish(topic, message);
+        //System.out.println("Message published");
+    }
+
+    private static MqttConnectOptions getMqttConnectOptions(String userName, String passWord) {
+        MqttConnectOptions connOpts = new MqttConnectOptions();
+        //是否清除Session，如果否，重新连接之后会自动关注之前关注的主题
+        connOpts.setCleanSession(true);
+        connOpts.setUserName(userName);
+        connOpts.setPassword(passWord.toCharArray());
+        connOpts.setAutomaticReconnect(true);
+        // 设置连接超时时间, 单位为秒,默认30
+        connOpts.setConnectionTimeout(30);
+        // 设置会话心跳时间,单位为秒,默认20
+        connOpts.setKeepAliveInterval(20);
+        return connOpts;
+    }
+
+    ///////////////////
 
     @Override
     protected void onDestroy() {

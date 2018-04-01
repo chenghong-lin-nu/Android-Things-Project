@@ -30,6 +30,9 @@ public class MqttHelper {
 
     final String publishTopic = "iot_data_pub";
 
+    public MqttHelper() {
+    }
+
     public MqttHelper(Context context){
         mqttAndroidClient = new MqttAndroidClient(context, serverUri, clientId);
         mqttAndroidClient.setCallback(new MqttCallbackExtended() {
@@ -130,5 +133,6 @@ public class MqttHelper {
             e.printStackTrace();
         }
     }
+
 
 }

@@ -45,8 +45,8 @@ public class ImagePreprocessor {
 
     public ImagePreprocessor(int previewWidth, int previewHeight,
                              int croppedwidth, int croppedHeight) {
-        this.croppedBitmap = Bitmap.createBitmap(croppedwidth, croppedHeight, Config.ARGB_8888);
-        this.rgbFrameBitmap = Bitmap.createBitmap(previewWidth, previewHeight, Config.ARGB_8888);
+        this.croppedBitmap = Bitmap.createBitmap(croppedwidth, croppedHeight, Config.RGB_565);
+        this.rgbFrameBitmap = Bitmap.createBitmap(previewWidth, previewHeight, Config.RGB_565);
     }
 
     public Bitmap preprocessImage(final Image image) {
