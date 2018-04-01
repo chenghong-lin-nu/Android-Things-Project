@@ -1,0 +1,43 @@
+{
+    "logs": [
+        {
+            "outputFile": "E:\\sample-tensorflow-imageclassifier\\app\\build\\intermediates\\incremental\\mergeDebugResources\\merged.dir\\values\\values.xml",
+            "map": [
+                {
+                    "source": "E:\\sample-tensorflow-imageclassifier\\app\\src\\main\\res\\values\\colors.xml",
+                    "from": {
+                        "startLines": "17",
+                        "startColumns": "4",
+                        "startOffsets": "667",
+                        "endColumns": "54",
+                        "endOffsets": "717"
+                    },
+                    "to": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "54",
+                        "endOffsets": "105"
+                    }
+                },
+                {
+                    "source": "E:\\sample-tensorflow-imageclassifier\\app\\src\\main\\res\\values\\strings.xml",
+                    "from": {
+                        "startLines": "16,19,17,20,18",
+                        "startColumns": "4,4,4,4,4",
+                        "startOffsets": "665,882,746,966,797",
+                        "endColumns": "79,82,49,77,83",
+                        "endOffsets": "740,960,791,1039,876"
+                    },
+                    "to": {
+                        "startLines": "3,4,5,6,7",
+                        "startColumns": "4,4,4,4,4",
+                        "startOffsets": "110,190,273,323,401",
+                        "endColumns": "79,82,49,77,83",
+                        "endOffsets": "185,268,318,396,480"
+                    }
+                }
+            ]
+        }
+    ]
+}
