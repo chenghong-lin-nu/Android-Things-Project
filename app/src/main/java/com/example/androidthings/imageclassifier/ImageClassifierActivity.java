@@ -109,6 +109,7 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
     // Mqtt部分
     MqttHelper mqttHelper;
     final String publishMessage = "Hello World!";
+    private String msg = null;  // 保存返回后信息的字符串
 
     @Override
     protected void onCreate(final Bundle savedInstanceState) {
@@ -136,8 +137,8 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
         mBackgroundHandler = new Handler(mBackgroundThread.getLooper());
         mBackgroundHandler.post(mInitializeOnBackground);
 
-        startMqtt();
-        //mqttHelper = new MqttHelper();
+        //startMqtt();
+        mqttHelper = new MqttHelper();
     }
 
     private Runnable mInitializeOnBackground = new Runnable() {
@@ -348,6 +349,20 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
                 }
 
                 // 还差接受另一个频道的消息
+                try {
+                    msg = null;
+                    MqttClient client = new MqttClient(mqttHelper.serverUri, mqttHelper.clientId,null);
+                    client.setCallback(new SimpleMqttCallBack());
+                    client.connect();
+                    client.subscribe("iot_data");
+                    msg = SimpleMqttCallBack.receivedMsg;
+                    if(msg != null){
+                        client.disconnect();
+                        SimpleMqttCallBack.receivedMsg = null;
+                    }
+                } catch (MqttException e) {
+                    e.printStackTrace();
+                }
             }
         }
 
