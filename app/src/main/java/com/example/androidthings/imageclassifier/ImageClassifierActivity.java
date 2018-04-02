@@ -57,10 +57,13 @@ import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
@@ -268,6 +271,8 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
             // 把image转化为bitmap
             bitmap = mImagePreprocessor.preprocessImage(image);
 
+
+
             //#######################################################################
             // 下面是我写的内容
             // 把bitmap转化为byte数组
@@ -322,7 +327,6 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
                     sampleClient.connect(connOpts);
                     System.out.println("Connected");
 
-                    //sampleClient.subscribe(mqttHelper.publishTopic);
 
                     //在另一个线程中发送消息
                     Thread thread = new Thread(() -> {
@@ -348,24 +352,36 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
                     e.printStackTrace();
                 }
 
-                // 还差接受另一个频道的消息
+                // 接受另一个频道返回的消息
                 try {
                     msg = null;
                     MqttClient client = new MqttClient(mqttHelper.serverUri, mqttHelper.clientId,null);
                     client.setCallback(new SimpleMqttCallBack());
                     client.connect();
                     client.subscribe("iot_data");
+                    /////////////////////////////////////////
+                    // 强制让它暂停20s
+                    Thread.sleep(8000) ;
+
                     msg = SimpleMqttCallBack.receivedMsg;
+                    System.out.println("看看接收到的消息是什么: "+msg);
+
                     if(msg != null){
+                        System.out.println("msg现在你收到啦???");
                         client.disconnect();
                         SimpleMqttCallBack.receivedMsg = null;
+                        System.out.println("disconnected!");
                     }
                 } catch (MqttException e) {
+                    e.printStackTrace();
+                } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
             }
         }
 
+        //===================================
+        // 我把它移到这里来了,本来应该在result上方的
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -373,17 +389,17 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
             }
         });
 
-        final Collection<Recognition> results = mTensorFlowClassifier.doRecognize(bitmap);
+        //final Collection<Recognition> results = mTensorFlowClassifier.doRecognize(bitmap);
 
-        Log.d(TAG, "Got the following results from Tensorflow: " + results);
+        Log.d(TAG, "Got the following results from Tensorflow: " + msg);
 
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                if (results == null || results.isEmpty()) {
+                if (msg == null || msg.isEmpty()) {
                     mResultText.setText("I don't understand what I see");
                 } else {
-                    StringBuilder sb = new StringBuilder();
+                    /*StringBuilder sb = new StringBuilder();
                     Iterator<Recognition> it = results.iterator();
                     int counter = 0;
                     while (it.hasNext()) {
@@ -395,8 +411,35 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
                         } else if (counter == results.size() - 1) {
                             sb.append(" or ");
                         }
+                    }*/
+                    System.out.println("这里msg执行了吗???");
+                    System.out.println(msg);
+                    String third_key=null, second_key=null, first_key="Unknown Animal";
+                    try {
+                        JSONObject obj = new JSONObject(msg);
+                        double tiger = obj.getDouble("tiger");
+                        double dog = obj.getDouble("dog");
+                        double cat = obj.getDouble("cat");
+                        double bird = obj.getDouble("bird");
+                        double fish = obj.getDouble("fish");
+                        double[] li = new double[5];
+                        li[0] = tiger;
+                        li[1] = dog;
+                        li[2] = cat;
+                        li[3] = bird;
+                        li[4] = fish;
+                        Arrays.sort(li);
+                        double third_prob=li[2], second_prob=li[3], first_prob=li[4];
+
+                        if(first_prob == tiger) first_key = "Tiger: "+(first_prob*100.0)+"%";
+                        if(first_prob == dog) first_key = "Dog: "+(first_prob*100.0)+"%";
+                        if(first_prob == cat) first_key = "Cat: "+(first_prob*100.0)+"%";
+                        if(first_prob == bird) first_key = "Bird: "+(first_prob*100.0)+"%";
+                        if(first_prob == fish) first_key = "Fish: "+(first_prob*100.0)+"%";
+                    } catch (JSONException e) {
+                        e.printStackTrace();
                     }
-                    mResultText.setText(sb.toString());
+                    mResultText.setText(first_key.toString());
                 }
             }
         });
