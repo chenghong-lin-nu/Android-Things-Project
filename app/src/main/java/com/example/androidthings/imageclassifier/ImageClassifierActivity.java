@@ -16,6 +16,7 @@
 package com.example.androidthings.imageclassifier;
 
 import android.app.Activity;
+import android.app.ProgressDialog;
 import android.content.Context;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
@@ -25,6 +26,7 @@ import android.media.ImageReader;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.os.Message;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 import android.text.TextUtils;
@@ -35,6 +37,7 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.ImageView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.alibaba.sdk.android.oss.ClientException;
 import com.alibaba.sdk.android.oss.OSSClient;
@@ -51,7 +54,11 @@ import com.google.android.things.contrib.driver.button.ButtonInputDriver;
 import com.google.android.things.pio.Gpio;
 import com.google.android.things.pio.PeripheralManager;
 
+import org.eclipse.paho.android.service.MqttAndroidClient;
+import org.eclipse.paho.client.mqttv3.IMqttActionListener;
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
+import org.eclipse.paho.client.mqttv3.IMqttToken;
+import org.eclipse.paho.client.mqttv3.MqttCallback;
 import org.eclipse.paho.client.mqttv3.MqttCallbackExtended;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
@@ -89,9 +96,7 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
     private static final int SHUTTER_KEYCODE = KeyEvent.KEYCODE_CAMERA;
 
     private ImagePreprocessor mImagePreprocessor;
-    private TextToSpeech mTtsEngine;
     private CameraHandler mCameraHandler;
-    private TensorFlowImageClassifier mTensorFlowClassifier;
 
     private HandlerThread mBackgroundThread;
     private Handler mBackgroundHandler;
@@ -114,6 +119,17 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
     final String publishMessage = "Hello World!";
     private String msg = null;  // 保存返回后信息的字符串
 
+
+    // 4.27号添加,Mqtt部分
+    public static MqttAndroidClient mqttIoTClient;
+    private MqttConnectOptions options;
+    // 4.27号添加End
+
+    // 4.28号添加等待进度条
+    // 等待进度框
+    private ProgressDialog progressDialog;
+    private Bitmap bitmap;  // 设置成为全局变量
+
     @Override
     protected void onCreate(final Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -123,15 +139,92 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
         mImage = findViewById(R.id.imageView);
         mResultText = findViewById(R.id.resultText);
 
+        msg = null;
+
         // ####################################################################
         credentialProvider = new OSSPlainTextAKSKCredentialProvider(ACCESS_KEY_ID, ACCESS_KEY_SECRET);
         client = new OSSClient(getApplicationContext(), ENDPOINT, credentialProvider);
-        System.out.println("初始化的时候有报错吗???");
 
-        // ????????????????????????????????
+        //4.27号添加Mqtt部分
+        mqttHelper = new MqttHelper();
+        String clientId = MqttClient.generateClientId();
+        mqttIoTClient = new MqttAndroidClient(this.getApplicationContext(), mqttHelper.serverUri, clientId);
+        options = new MqttConnectOptions();
+        options.setUserName(mqttHelper.username);
+        options.setPassword(mqttHelper.password.toCharArray());
+
+
+        // 4.27号添加---子线程,用于实现Mqtt订阅控制摄像头的功能
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    IMqttToken token = mqttIoTClient.connect(options);
+                    token.setActionCallback(new IMqttActionListener() {
+                        @Override
+                        public void onSuccess(IMqttToken asyncActionToken) {
+                            // We are connected
+                            Toast.makeText(ImageClassifierActivity.this, "Connected!", Toast.LENGTH_LONG).show();
+                            setSubscription("control_camera_iot");
+                        }
+
+                        @Override
+                        public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
+                            // Something went wrong e.g. connection timeout or firewall problems
+                            Toast.makeText(ImageClassifierActivity.this, "Connection Failed!", Toast.LENGTH_LONG).show();
+
+                        }
+                    });
+
+
+                    // 下面那个是设置回调函数
+                    mqttIoTClient.setCallback(new MqttCallback() {
+                        @Override
+                        public void connectionLost(Throwable cause) {
+
+                        }
+
+                        // 接收到消息
+                        @Override
+                        public void messageArrived(String topic, MqttMessage message) throws Exception {
+                            System.out.println("啦啦啦啦啦！！这里出现了说明线程可以运行！！！！");
+                            System.out.println("看看是哪个topic的: "+topic);
+                            if(topic.equals("control_camera_iot")) {
+                                // 接收到的消息
+                                String receivedMsg = new String(message.getPayload());
+                                if (receivedMsg.equals("capturePic")) {
+                                    // 开始捕获图像
+                                    startImageCapture();
+                                }
+                            }else if(topic.equals("iot_data")){
+                                String receivedMsg = new String(message.getPayload());
+                                System.out.println("看看这个线程里面收到的消息是什么: "+receivedMsg);
+                                msg = receivedMsg;
+                            }
+                        }
+
+                        @Override
+                        public void deliveryComplete(IMqttDeliveryToken token) {
+
+                        }
+                    });
+                } catch (MqttException e) {
+                    e.printStackTrace();
+                }
+            }
+        }).start();
+
         // 先暂时把它注释一下
         init();
+    }
 
+    // 订阅某个topic
+    private void setSubscription(String topic_name){
+        try {
+            mqttIoTClient.subscribe(topic_name, 0);
+        } catch (MqttException e) {
+            e.printStackTrace();
+        }
     }
 
     private void init() {
@@ -141,7 +234,7 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
         mBackgroundHandler.post(mInitializeOnBackground);
 
         //startMqtt();
-        mqttHelper = new MqttHelper();
+        /*mqttHelper = new MqttHelper();*/
     }
 
     private Runnable mInitializeOnBackground = new Runnable() {
@@ -155,44 +248,9 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
                     PREVIEW_IMAGE_WIDTH, PREVIEW_IMAGE_HEIGHT, mBackgroundHandler,
                     ImageClassifierActivity.this);
 
-            try {
-                mTensorFlowClassifier = new TensorFlowImageClassifier(ImageClassifierActivity.this,
-                        TF_INPUT_IMAGE_WIDTH, TF_INPUT_IMAGE_HEIGHT);
-            } catch (IOException e) {
-                throw new IllegalStateException("Cannot initialize TFLite Classifier", e);
-            }
-
             setReady(true);
         }
     };
-
-    // Mqtt部分
-    private void startMqtt(){
-        mqttHelper = new MqttHelper(getApplicationContext());
-        mqttHelper.setCallback(new MqttCallbackExtended() {
-            @Override
-            public void connectComplete(boolean b, String s) {
-
-            }
-
-            @Override
-            public void connectionLost(Throwable throwable) {
-
-            }
-
-            @Override
-            public void messageArrived(String topic, MqttMessage mqttMessage) throws Exception {
-                Log.w("Debug",mqttMessage.toString());
-                //dataReceived.setText(mqttMessage.toString());
-                System.out.println("嗨，我倒要看看你收到了什么信息"+mqttMessage.toString());
-            }
-
-            @Override
-            public void deliveryComplete(IMqttDeliveryToken iMqttDeliveryToken) {
-
-            }
-        });
-    }
 
     private Runnable mBackgroundClickHandler = new Runnable() {
         @Override
@@ -262,16 +320,11 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
     // 再调用TensorFlow 来处理图像
     @Override
     public void onImageAvailable(ImageReader reader) {
-        final Bitmap bitmap;
-        System.out.println("想看一下Image到底是什么?");
 
         //下面就是获取图片的代码
-
         try (Image image = reader.acquireNextImage()) {
             // 把image转化为bitmap
             bitmap = mImagePreprocessor.preprocessImage(image);
-
-
 
             //#######################################################################
             // 下面是我写的内容
@@ -286,7 +339,6 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
             try {
                 String object_key = FOLDER + "camera_img.jpg";
                 PutObjectRequest put = new PutObjectRequest(BUCKET_NAME, object_key, byteArray);
-                System.out.println("PutObjectRequest这里出现了问题????");
 
                 PutObjectResult putResult = client.putObject(put);
                 Log.d("PutObject", "UploadSuccess");
@@ -296,7 +348,7 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
                 // ###########################################
                 // 保存上传图片的文件路径
                 img_url = "https://tf-img-classifier.oss-cn-shanghai.aliyuncs.com/camera_img.jpg";
-                System.out.println("---------------->成功!");
+                System.out.println("---------------->OSS上传成功!");
 
                 flag = 1;
             } catch (ClientException e) {
@@ -315,69 +367,46 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
                 // ##################################################
                 // 4.1号添加
                 // Mqtt发布到broker中去
-                //mqttHelper.publishMessage(img_url);
+                // 4.28号再次进行代码的整改Publish!
                 try {
-                    MqttClient sampleClient = new MqttClient(mqttHelper.serverUri, mqttHelper.clientId, null);
-                    //sampleClient.setCallback(new MyMqttCallback());
+                    mqttIoTClient.publish(mqttHelper.publishTopic, img_url.getBytes(), 0, false);
+                    Toast.makeText(ImageClassifierActivity.this, "Publish Successful!", Toast.LENGTH_LONG).show();
 
-                    // 创建连接选择
-                    MqttConnectOptions connOpts = getMqttConnectOptions(mqttHelper.username,mqttHelper.password);
-                    System.out.println("Connecting to broker: "+mqttHelper.serverUri);
-
-                    sampleClient.connect(connOpts);
-                    System.out.println("Connected");
-
-
-                    //在另一个线程中发送消息
-                    Thread thread = new Thread(() -> {
-                        try {
-                            publishMsg(mqttHelper.publishTopic, img_url, sampleClient);
-                        } catch (MqttException e) {
-                            e.printStackTrace();
-                        }
-                    });
-                    thread.start();
-
-                    thread.join();
-                    //断开服务连接
-                    sampleClient.disconnect();
-                    System.out.println("Disconnected");
-                } catch (MqttException me) {
-                    System.out.println("reason "+me.getReasonCode());
-                    System.out.println("msg "+me.getMessage());
-                    System.out.println("loc "+me.getLocalizedMessage());
-                    System.out.println("cause "+me.getCause());
-                    System.out.println("excep "+me);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-
-                // 接受另一个频道返回的消息
-                try {
+                    // 清空msg
                     msg = null;
-                    MqttClient client = new MqttClient(mqttHelper.serverUri, mqttHelper.clientId,null);
-                    client.setCallback(new SimpleMqttCallBack());
-                    client.connect();
-                    client.subscribe("iot_data");
-                    /////////////////////////////////////////
-                    // 强制让它暂停20s
-                    Thread.sleep(8000) ;
+                    // 设置订阅另一个topic的操作!!!(不知道这样能不能行...)
+                    setSubscription(mqttHelper.subscriptionTopic);
 
-                    msg = SimpleMqttCallBack.receivedMsg;
-                    System.out.println("看看接收到的消息是什么: "+msg);
+                    // 加上等待进度条
+                    progressDialog = new ProgressDialog(ImageClassifierActivity.this);
+                    progressDialog.setTitle("Predict");
+                    progressDialog.setMessage("Loading...Plz wait...");
+                    progressDialog.setCancelable(false);
+                    progressDialog.show();
 
-                    if(msg != null){
-                        System.out.println("msg现在你收到啦???");
-                        client.disconnect();
-                        SimpleMqttCallBack.receivedMsg = null;
-                        System.out.println("disconnected!");
-                    }
+                    /* 开启一个新线程，在新线程里执行耗时的方法 */
+                    new Thread(new Runnable() {
+                        @Override
+                        public void run() {
+                            spandTimeMethod();// 耗时的方法
+                            handler.sendEmptyMessage(0);// 执行耗时的方法之后发送消给handler
+                        }
+
+                    }).start();
                 } catch (MqttException e) {
-                    e.printStackTrace();
-                } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
             }
+        }
+
+
+    }
+
+
+    // 4.28加: 耗时方法
+    private void spandTimeMethod(){
+        while(msg == null || msg.isEmpty()){
+            if(msg!=null) break;
         }
 
         //===================================
@@ -389,29 +418,12 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
             }
         });
 
-        //final Collection<Recognition> results = mTensorFlowClassifier.doRecognize(bitmap);
-
-        Log.d(TAG, "Got the following results from Tensorflow: " + msg);
-
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
                 if (msg == null || msg.isEmpty()) {
                     mResultText.setText("I don't understand what I see");
                 } else {
-                    /*StringBuilder sb = new StringBuilder();
-                    Iterator<Recognition> it = results.iterator();
-                    int counter = 0;
-                    while (it.hasNext()) {
-                        Recognition r = it.next();
-                        sb.append(r.getTitle());
-                        counter++;
-                        if (counter < results.size() - 1 ) {
-                            sb.append(", ");
-                        } else if (counter == results.size() - 1) {
-                            sb.append(" or ");
-                        }
-                    }*/
                     System.out.println("这里msg执行了吗???");
                     System.out.println(msg);
                     String third_key=null, second_key=null, first_key="Unknown Animal";
@@ -449,32 +461,13 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
         setReady(true);
     }
 
-    //////////////////////
-    private static void publishMsg(String topic, String content, MqttClient sampleClient) throws MqttException {
-        System.out.println("消息的内容是什么呢?"+content);
-
-        //创建消息内容
-        MqttMessage message = new MqttMessage(content.getBytes());
-        //发送消息
-        sampleClient.publish(topic, message);
-        //System.out.println("Message published");
-    }
-
-    private static MqttConnectOptions getMqttConnectOptions(String userName, String passWord) {
-        MqttConnectOptions connOpts = new MqttConnectOptions();
-        //是否清除Session，如果否，重新连接之后会自动关注之前关注的主题
-        connOpts.setCleanSession(true);
-        connOpts.setUserName(userName);
-        connOpts.setPassword(passWord.toCharArray());
-        connOpts.setAutomaticReconnect(true);
-        // 设置连接超时时间, 单位为秒,默认30
-        connOpts.setConnectionTimeout(30);
-        // 设置会话心跳时间,单位为秒,默认20
-        connOpts.setKeepAliveInterval(20);
-        return connOpts;
-    }
-
-    ///////////////////
+    Handler handler = new Handler() {
+        @Override
+        public void handleMessage(Message msg) {// handler接收到消息后就会执行此方法
+            progressDialog.dismiss();// 关闭ProgressDialog
+        }
+    };
+    // 4.28加：耗时方法结束
 
     @Override
     protected void onDestroy() {
@@ -492,11 +485,11 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
         } catch (Throwable t) {
             // close quietly
         }
-        try {
+        /*try {
             if (mTensorFlowClassifier != null) mTensorFlowClassifier.destroyClassifier();
         } catch (Throwable t) {
             // close quietly
-        }
+        }*/
         try {
             if (mButtonDriver != null) mButtonDriver.close();
         } catch (Throwable t) {
