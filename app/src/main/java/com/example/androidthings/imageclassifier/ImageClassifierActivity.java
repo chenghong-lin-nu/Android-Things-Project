@@ -200,6 +200,7 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
                                 String receivedMsg = new String(message.getPayload());
                                 System.out.println("看看这个线程里面收到的消息是什么: "+receivedMsg);
                                 msg = receivedMsg;
+                                System.out.println("那msg呢: "+msg);
                             }
                         }
 
@@ -369,11 +370,12 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
                 // Mqtt发布到broker中去
                 // 4.28号再次进行代码的整改Publish!
                 try {
+                    // 清空msg
+                    msg = null;
+
                     mqttIoTClient.publish(mqttHelper.publishTopic, img_url.getBytes(), 0, false);
                     Toast.makeText(ImageClassifierActivity.this, "Publish Successful!", Toast.LENGTH_LONG).show();
 
-                    // 清空msg
-                    msg = null;
                     // 设置订阅另一个topic的操作!!!(不知道这样能不能行...)
                     setSubscription(mqttHelper.subscriptionTopic);
 
@@ -406,6 +408,7 @@ public class ImageClassifierActivity extends Activity implements ImageReader.OnI
     // 4.28加: 耗时方法
     private void spandTimeMethod(){
         while(msg == null || msg.isEmpty()){
+            System.out.println("xxxxxxxxx------->: "+msg);
             if(msg!=null) break;
         }
 

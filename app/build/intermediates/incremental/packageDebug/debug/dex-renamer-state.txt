@@ -1,4 +1,4 @@
-#Sat Apr 28 22:34:04 CST 2018
+#Sun Apr 29 10:49:45 CST 2018
 base.0=E\:\\sample-tensorflow-imageclassifier\\app\\build\\intermediates\\transforms\\dexMerger\\debug\\0
 path.0=classes.dex
 renamed.0=classes.dex
